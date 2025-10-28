@@ -1,0 +1,14 @@
+[
+  {
+    "NumeroCuenta": "1001",
+    "Saldo": 1500.00
+  },
+  {
+    "NumeroCuenta": "9999",
+    "Saldo": 0
+  },
+  {
+    "NumeroCuenta": "1236",
+    "Saldo": 2200
+  }
+]

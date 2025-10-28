@@ -1,20 +1,50 @@
-﻿using cajero_automatico.Models;
+﻿using System.Text.Json;
+using CajeroApp.models;
 
-namespace cajero_automatico.Repos;
-
-public class TransaccionRepo : JsonRepo<Transaccion>
+namespace CajeroApp.Repos
 {
-    public TransaccionRepo(string path) : base(path) { }
-
-    public List<Transaccion> ObtenerTodos() => Leer();
-
-    public List<Transaccion> ObtenerPorCuenta(string cuenta) =>
-        Leer().Where(t => t.NumeroCuenta == cuenta).ToList();
-
-    public void Agregar(Transaccion t)
+    public class TransaccionRepo
     {
-        var lista = Leer();
-        lista.Add(t);
-        Guardar(lista);
+        private readonly string _path;
+        private readonly JsonSerializerOptions _opts = new JsonSerializerOptions
+        {
+            WriteIndented = true
+        };
+
+        public TransaccionRepo(string path)
+        {
+            _path = path;
+            if (!File.Exists(_path))
+            {
+                File.WriteAllText(_path, "[]");
+            }
+        }
+
+        private List<Transaccion> LeerTodo()
+        {
+            var raw = File.ReadAllText(_path);
+            var data = JsonSerializer.Deserialize<List<Transaccion>>(raw, _opts);
+            return data ?? new List<Transaccion>();
+        }
+
+        private void GuardarTodo(List<Transaccion> lista)
+        {
+            var raw = JsonSerializer.Serialize(lista, _opts);
+            File.WriteAllText(_path, raw);
+        }
+
+        public List<Transaccion> ObtenerPorCuenta(string numeroCuenta)
+        {
+            return LeerTodo()
+                .Where(t => t.NumeroCuenta == numeroCuenta)
+                .ToList();
+        }
+
+        public void Agregar(Transaccion t)
+        {
+            var lista = LeerTodo();
+            lista.Add(t);
+            GuardarTodo(lista);
+        }
     }
 }

@@ -1,11 +1,13 @@
-﻿namespace cajero_automatico.Models;
-
-public class Transaccion
+﻿namespace CajeroApp.models
 {
-    public string Id { get; set; } = Guid.NewGuid().ToString();
-    public DateTime Fecha { get; set; } = DateTime.Now;
-    public string NumeroCuenta { get; set; } = "";
-    public TipoTransaccion Tipo { get; set; }
-    public decimal Monto { get; set; }
-    public string Detalle { get; set; } = "";
+    public class Transaccion
+    {
+        public string NumeroCuenta { get; set; } = "";
+        public DateTime Fecha { get; set; }
+        public string Tipo { get; set; } = ""; // "DEPOSITO", "RETIRO", "TRANSFERENCIA", "ADMIN-AJUSTE"
+        public decimal Monto { get; set; }
+
+        // Para transferencias / ajustes
+        public string? CuentaDestino { get; set; }
+    }
 }

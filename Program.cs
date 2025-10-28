@@ -1,214 +1,583 @@
-﻿using cajero_automatico.Models;
-using cajero_automatico.Repos;
-using cajero_automatico.Services;
-using cajero_automatico.Utils;
+﻿using CajeroApp.models;
+using CajeroApp.Repos;
+using CajeroApp.Services;
+using CajeroApp.Utils;
 
-var dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+// =========== CONFIGURAR RUTAS A /data ===========
+var projectRoot = Directory.GetParent(AppContext.BaseDirectory)
+                    ?.Parent
+                    ?.Parent
+                    ?.Parent
+                    ?.FullName
+                ?? AppContext.BaseDirectory;
+
+var dataDir = Path.Combine(projectRoot, "data");
 Directory.CreateDirectory(dataDir);
 
-// Rutas JSON
 var usuariosPath = Path.Combine(dataDir, "usuarios.json");
 var cuentasPath = Path.Combine(dataDir, "cuentas.json");
 var transPath = Path.Combine(dataDir, "transacciones.json");
 
-// Repos
+// repos / servicios
 var usuarioRepo = new UsuarioRepo(usuariosPath);
 var cuentaRepo = new CuentaRepo(cuentasPath);
 var transRepo = new TransaccionRepo(transPath);
 
-// Servicios
-var auth = new AuthService(usuarioRepo);
-var atm = new AtmService(cuentaRepo, transRepo);
+var authService = new AuthService(usuarioRepo);
+var atmService = new AtmService(cuentaRepo, transRepo, usuarioRepo);
 
-// Semilla demo
-if (usuarioRepo.ObtenerTodos().Count == 0 && cuentaRepo.ObtenerTodos().Count == 0)
-{
-    ConsoleUI.Titulo("Inicializando datos de ejemplo");
-    var demo = new Usuario
-    {
-        NumeroCuenta = "1001",
-        Nombre = "Usuario Demo",
-        PinHash = Hashing.Sha256("1234")
-    };
-    usuarioRepo.Agregar(demo);
-    cuentaRepo.Agregar(new Cuenta { NumeroCuenta = "1001", Saldo = 1500.00m });
-    ConsoleUI.Info("Cuenta demo 1001 (PIN 1234) creada.");
-    ConsoleUI.Continuar();
-}
+// datos iniciales
+Semilla(usuarioRepo, cuentaRepo);
 
-// Menú principal
+// =========== LOOP MENÚ PRINCIPAL ===========
 while (true)
 {
-    ConsoleUI.Limpiar();
-    ConsoleUI.Caja("SIMULADOR DE CAJERO AUTOMÁTICO");
+    Console.Clear();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("+----------------------------------+");
+    Console.WriteLine("| CAJERO AUTOMÁTICO -MENÚ PRINCIPAL|");
+    Console.WriteLine("+----------------------------------+");
 
-    Console.WriteLine("1) Iniciar sesión");
-    Console.WriteLine("2) Crear nueva cuenta");
-    Console.WriteLine("3) Salir");
-    Console.Write("Opción: ");
-    var op = Console.ReadLine();
+    Console.ResetColor();
+    Console.ForegroundColor = ConsoleColor.DarkGreen;
+    
+    Console.WriteLine($"   |Fecha:{DateTime.Now:dd/MM/yyyy} Hora:{DateTime.Now:HH:mm}|");
+    
+    Console.ResetColor();
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine(" [1] Iniciar sesión              ");      
+    Console.WriteLine(" [2] Crear nueva cuenta          ");
+    Console.WriteLine(" [3] Salir                       ");
+    
+    Console.WriteLine();
+    Console.Write("Seleccione una opción: ");
+    string? opcion = Console.ReadLine();
 
-    switch (op)
+    if (opcion == "1")
     {
-        case "1": IniciarSesion(); break;
-        case "2": CrearCuenta(); break;
-        case "3":
-            ConsoleUI.Ok("¡Gracias por usar el simulador!");
-            return;
-        default:
-            ConsoleUI.Advertencia("Opción inválida.");
-            ConsoleUI.Continuar();
-            break;
+        var sesion = IniciarSesion(authService, cuentaRepo);
+        if (sesion.usuario != null && sesion.cuenta != null)
+        {
+            if (sesion.usuario.IsAdmin)
+                MenuAdmin(sesion.usuario, sesion.cuenta);
+            else
+                MenuUsuario(sesion.usuario, sesion.cuenta);
+        }
+    }
+    else if (opcion == "2")
+    {
+        CrearCuentaFlujo(atmService);
+    }
+    else if (opcion == "3")
+    {
+        Console.WriteLine();
+        Console.WriteLine("[OK] Gracias por usar el sistema.");
+        Pausa();
+        break;
+    }
+    else
+    {
+        Console.WriteLine();
+        Console.WriteLine("[ERROR] Opción inválida.");
+        Pausa();
     }
 }
 
-void IniciarSesion()
+// =========== FUNCIONES ===========
+
+(Usuario? usuario, Cuenta? cuenta) IniciarSesion(AuthService auth, CuentaRepo cuentaRepo)
 {
-    ConsoleUI.Limpiar();
-    ConsoleUI.Titulo("Inicio de sesión");
+    Console.Clear();
+    Console.WriteLine("====================================");
+    Console.WriteLine(" INICIAR SESIÓN ");
+    Console.WriteLine("====================================");
 
     Console.Write("Número de cuenta: ");
-    var cuenta = Console.ReadLine()?.Trim() ?? "";
+    string numeroCuenta = Console.ReadLine() ?? "";
 
     Console.Write("PIN: ");
-    var pin = ConsoleUI.LeerOculto();
+    string pin = LeerPinOculto();
 
-    var usuario = auth.Login(cuenta, pin);
-    if (usuario is null)
+    var usuario = auth.Autenticar(numeroCuenta, pin);
+    if (usuario == null)
     {
-        ConsoleUI.Error("Cuenta o PIN incorrecto.");
-        ConsoleUI.Continuar();
-        return;
+        Console.WriteLine();
+        Console.WriteLine("[ERROR] Credenciales inválidas o cuenta bloqueada.");
+        Pausa();
+        return (null, null);
     }
 
-    ConsoleUI.Ok("Bienvenido, {usuario.Nombre}");
-    ConsoleUI.Continuar();
-    MenuUsuario(usuario.NumeroCuenta);
+    var cuenta = cuentaRepo.ObtenerPorNumeroCuenta(usuario.NumeroCuenta);
+    if (cuenta == null)
+    {
+        Console.WriteLine();
+        Console.WriteLine("[ERROR] No se encontró la cuenta asociada.");
+        Pausa();
+        return (null, null);
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("[OK] Inicio de sesión correcto.");
+    Pausa();
+    return (usuario, cuenta);
 }
 
-void MenuUsuario(string numeroCuenta)
+void MenuUsuario(Usuario usuario, Cuenta cuenta)
 {
     while (true)
     {
-        ConsoleUI.Limpiar();
-        ConsoleUI.Caja($"Cuenta {numeroCuenta}");
-        Console.WriteLine("1) Consultar saldo");
-        Console.WriteLine("2) Depositar");
-        Console.WriteLine("3) Retirar");
-        Console.WriteLine("4) Transferir");
-        Console.WriteLine("5) Ver historial");
-        Console.WriteLine("6) Cerrar sesión");
-        Console.Write("Opción: ");
-        var op = Console.ReadLine();
+        cuenta = cuentaRepo.ObtenerPorNumeroCuenta(cuenta.NumeroCuenta)!;
 
-        try
+        Console.Clear();
+        Console.WriteLine("====================================");
+        Console.WriteLine(" SESIÓN DE USUARIO ");
+        Console.WriteLine("====================================");
+        Console.WriteLine($"Cuenta : {cuenta.NumeroCuenta}");
+        Console.WriteLine($"Titular: {usuario.Nombre}");
+        Console.WriteLine($"Saldo  : Q {cuenta.Saldo:F2}");
+        Console.WriteLine("------------------------------------");
+        Console.WriteLine("[1] Consultar saldo");
+        Console.WriteLine("[2] Depositar");
+        Console.WriteLine("[3] Retirar");
+        Console.WriteLine("[4] Transferir");
+        Console.WriteLine("[5] Ver historial");
+        Console.WriteLine("[6] Cerrar sesión");
+        Console.WriteLine();
+        Console.Write("Seleccione una opción: ");
+        string? opcion = Console.ReadLine();
+
+        if (opcion == "1")
         {
-            switch (op)
-            {
-                case "1":
-                    var saldo = atm.ObtenerSaldo(numeroCuenta);
-                    ConsoleUI.Info($"Saldo actual: Q {saldo:N2}");
-                    ConsoleUI.Continuar();
-                    break;
-
-                case "2":
-                    Console.Write("Monto a depositar: ");
-                    if (!decimal.TryParse(Console.ReadLine(), out var dep) || dep <= 0)
-                        throw new Exception("Monto inválido.");
-                    atm.Depositar(numeroCuenta, dep);
-                    ConsoleUI.Ok("Depósito exitoso.");
-                    ConsoleUI.Continuar();
-                    break;
-
-                case "3":
-                    Console.Write("Monto a retirar: ");
-                    if (!decimal.TryParse(Console.ReadLine(), out var ret) || ret <= 0)
-                        throw new Exception("Monto inválido.");
-                    atm.Retirar(numeroCuenta, ret);
-                    ConsoleUI.Ok("Retiro exitoso.");
-                    ConsoleUI.Continuar();
-                    break;
-
-                case "4":
-                    Console.Write("Cuenta destino: ");
-                    var destino = Console.ReadLine()?.Trim() ?? "";
-                    Console.Write("Monto a transferir: ");
-                    if (!decimal.TryParse(Console.ReadLine(), out var monto) || monto <= 0)
-                        throw new Exception("Monto inválido.");
-                    atm.Transferir(numeroCuenta, destino, monto);
-                    ConsoleUI.Ok("Transferencia realizada.");
-                    ConsoleUI.Continuar();
-                    break;
-
-                case "5":
-                    var h = atm.Historial(numeroCuenta);
-                    ConsoleUI.Titulo("Historial de Transacciones");
-                    if (h.Count == 0) ConsoleUI.Info("Sin transacciones registradas.");
-                    foreach (var t in h.OrderByDescending(x => x.Fecha))
-                        Console.WriteLine($"{t.Fecha:g} | {t.Tipo} | Q {t.Monto:N2} | {t.Detalle}");
-                    ConsoleUI.Continuar();
-                    break;
-
-                case "6":
-                    ConsoleUI.Info("Sesión cerrada.");
-                    ConsoleUI.Continuar();
-                    return;
-
-                default:
-                    ConsoleUI.Advertencia("Opción inválida.");
-                    ConsoleUI.Continuar();
-                    break;
-            }
+            ConsultarSaldo(cuenta);
         }
-        catch (Exception ex)
+        else if (opcion == "2")
         {
-            ConsoleUI.Error(ex.Message);
-            ConsoleUI.Continuar();
+            DepositarPropio(atmService, cuenta);
+        }
+        else if (opcion == "3")
+        {
+            Retirar(atmService, cuenta);
+        }
+        else if (opcion == "4")
+        {
+            Transferir(atmService, cuenta);
+        }
+        else if (opcion == "5")
+        {
+            VerHistorialPropio(atmService, cuenta);
+        }
+        else if (opcion == "6")
+        {
+            Console.WriteLine();
+            Console.WriteLine("[AVISO] Sesión cerrada.");
+            Pausa();
+            break;
+        }
+        else
+        {
+            Console.WriteLine();
+            Console.WriteLine("[ERROR] Opción inválida.");
+            Pausa();
         }
     }
 }
 
-void CrearCuenta()
+void MenuAdmin(Usuario admin, Cuenta cuentaAdmin)
 {
-    ConsoleUI.Limpiar();
-    ConsoleUI.Titulo("Crear Nueva Cuenta");
+    while (true)
+    {
+        Console.Clear();
 
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("{====================================");
+        Console.WriteLine(" PANEL DE ADMINISTRACIÓN ");
+        Console.WriteLine("====================================");
+        Console.WriteLine($"Admin  : {admin.Nombre}");
+        Console.WriteLine($"Cuenta : {admin.NumeroCuenta}");
+        Console.WriteLine("------------------------------------");
+        Console.WriteLine("[1] Ver todas las cuentas");
+        Console.WriteLine("[2] Ver historial de una cuenta");
+        Console.WriteLine("[3] Depositar en una cuenta (ajuste)");
+        Console.WriteLine("[4] Crear nueva cuenta");
+        Console.WriteLine("[5] Desbloquear cuenta");
+        Console.WriteLine("[6] Cerrar sesión admin");
+        Console.WriteLine();
+        Console.Write("Seleccione una opción: ");
+        string? opcion = Console.ReadLine();
+
+        if (opcion == "1")
+        {
+            AdminListarCuentas();
+        }
+        else if (opcion == "2")
+        {
+            AdminVerHistorialCuenta();
+        }
+        else if (opcion == "3")
+        {
+            AdminDepositarEnCuenta(admin);
+        }
+        else if (opcion == "4")
+        {
+            CrearCuentaFlujo(atmService, esAdminCreando: true);
+        }
+        else if (opcion == "5")
+        {
+            AdminDesbloquearCuenta();
+        }
+        else if (opcion == "6")
+        {
+            Console.WriteLine();
+            Console.WriteLine("[AVISO] Sesión admin cerrada.");
+            Pausa();
+            break;
+        }
+        else
+        {
+            Console.WriteLine();
+            Console.WriteLine("[ERROR] Opción inválida.");
+            Pausa();
+        }
+    }
+}
+
+void ConsultarSaldo(Cuenta cuenta)
+{
+    Console.Clear();
+    Console.WriteLine("---------- CONSULTA DE SALDO ----------");
+    Console.WriteLine($"Cuenta: {cuenta.NumeroCuenta}");
+    Console.WriteLine($"Saldo : Q {cuenta.Saldo:F2}");
+    Pausa();
+}
+
+void DepositarPropio(AtmService atm, Cuenta cuenta)
+{
+    Console.Clear();
+    Console.WriteLine("---------- DEPÓSITO ----------");
+    Console.Write("Monto a depositar (Q): ");
+    if (!decimal.TryParse(Console.ReadLine(), out var monto) || monto <= 0)
+    {
+        Console.WriteLine("[ERROR] Monto inválido.");
+        Pausa();
+        return;
+    }
+
+    bool ok = atm.Depositar(cuenta.NumeroCuenta, monto);
+    if (!ok)
+    {
+        Console.WriteLine("[ERROR] No se pudo completar el depósito.");
+        Pausa();
+        return;
+    }
+
+    var actualizada = cuentaRepo.ObtenerPorNumeroCuenta(cuenta.NumeroCuenta)!;
+    Console.WriteLine("[OK] Depósito realizado.");
+    Console.WriteLine($"Nuevo saldo: Q {actualizada.Saldo:F2}");
+    Pausa();
+}
+
+void Retirar(AtmService atm, Cuenta cuenta)
+{
+    Console.Clear();
+    Console.WriteLine("---------- RETIRO ----------");
+    Console.WriteLine($"Saldo disponible: Q {cuenta.Saldo:F2}");
+    Console.Write("Monto a retirar (Q): ");
+    if (!decimal.TryParse(Console.ReadLine(), out var monto) || monto <= 0)
+    {
+        Console.WriteLine("[ERROR] Monto inválido.");
+        Pausa();
+        return;
+    }
+
+    bool ok = atm.Retirar(cuenta.NumeroCuenta, monto);
+    if (!ok)
+    {
+        Console.WriteLine("[ERROR] No se pudo retirar (saldo insuficiente o límite excedido).");
+        Pausa();
+        return;
+    }
+
+    var actualizada = cuentaRepo.ObtenerPorNumeroCuenta(cuenta.NumeroCuenta)!;
+    Console.WriteLine("[OK] Retiro realizado.");
+    Console.WriteLine($"Nuevo saldo: Q {actualizada.Saldo:F2}");
+    Pausa();
+}
+
+void Transferir(AtmService atm, Cuenta origen)
+{
+    Console.Clear();
+    Console.WriteLine("---------- TRANSFERENCIA ----------");
+    Console.Write("Cuenta destino: ");
+    string destino = Console.ReadLine() ?? "";
+
+    Console.Write("Monto a transferir (Q): ");
+    if (!decimal.TryParse(Console.ReadLine(), out var monto) || monto <= 0)
+    {
+        Console.WriteLine("[ERROR] Monto inválido.");
+        Pausa();
+        return;
+    }
+
+    bool ok = atm.Transferir(origen.NumeroCuenta, destino, monto);
+    if (!ok)
+    {
+        Console.WriteLine("[ERROR] No se pudo transferir (saldo insuficiente o cuenta destino no existe).");
+        Pausa();
+        return;
+    }
+
+    var actualizada = cuentaRepo.ObtenerPorNumeroCuenta(origen.NumeroCuenta)!;
+    Console.WriteLine("[OK] Transferencia realizada.");
+    Console.WriteLine($"Nuevo saldo: Q {actualizada.Saldo:F2}");
+    Pausa();
+}
+
+void VerHistorialPropio(AtmService atm, Cuenta cuenta)
+{
+    Console.Clear();
+    Console.WriteLine("---------- HISTORIAL ----------");
+
+    var lista = atm.ObtenerHistorial(cuenta.NumeroCuenta);
+
+    if (lista.Count == 0)
+    {
+        Console.WriteLine("No hay transacciones todavía.");
+        Pausa();
+        return;
+    }
+
+    foreach (var t in lista)
+    {
+        Console.WriteLine("------------------------------------");
+        Console.WriteLine($"Fecha : {t.Fecha:dd/MM/yyyy HH:mm:ss}");
+        Console.WriteLine($"Tipo  : {t.Tipo}");
+        Console.WriteLine($"Monto : Q {t.Monto:F2}");
+        if (!string.IsNullOrWhiteSpace(t.CuentaDestino))
+        {
+            Console.WriteLine($"Destino: {t.CuentaDestino}");
+        }
+    }
+    Console.WriteLine("------------------------------------");
+    Pausa();
+}
+
+// =========== FUNCIONES ADMIN ===========
+
+void AdminListarCuentas()
+{
+    Console.Clear();
+    Console.WriteLine("---------- TODAS LAS CUENTAS ----------");
+
+    var cuentas = atmService.ListarTodasLasCuentas();
+    if (cuentas.Count == 0)
+    {
+        Console.WriteLine("No hay cuentas registradas.");
+    }
+    else
+    {
+        foreach (var c in cuentas)
+        {
+            Console.WriteLine($"Cuenta: {c.NumeroCuenta} | Saldo: Q {c.Saldo:F2}");
+        }
+    }
+    Pausa();
+}
+
+void AdminVerHistorialCuenta()
+{
+    Console.Clear();
+    Console.WriteLine("---------- HISTORIAL DE CUENTA ----------");
     Console.Write("Número de cuenta: ");
-    var num = Console.ReadLine()?.Trim() ?? "";
-    if (string.IsNullOrWhiteSpace(num))
+    string num = Console.ReadLine() ?? "";
+
+    var lista = atmService.ObtenerHistorial(num);
+
+    if (lista.Count == 0)
     {
-        ConsoleUI.Advertencia("El número de cuenta es obligatorio.");
-        ConsoleUI.Continuar();
+        Console.WriteLine("No hay transacciones o la cuenta no existe.");
+        Pausa();
         return;
     }
-    if (usuarioRepo.ObtenerPorCuenta(num) != null || cuentaRepo.ObtenerPorCuenta(num) != null)
+
+    foreach (var t in lista)
     {
-        ConsoleUI.Advertencia("Esa cuenta ya existe.");
-        ConsoleUI.Continuar();
+        Console.WriteLine("------------------------------------");
+        Console.WriteLine($"Cuenta: {t.NumeroCuenta}");
+        Console.WriteLine($"Fecha : {t.Fecha:dd/MM/yyyy HH:mm:ss}");
+        Console.WriteLine($"Tipo  : {t.Tipo}");
+        Console.WriteLine($"Monto : Q {t.Monto:F2}");
+        if (!string.IsNullOrWhiteSpace(t.CuentaDestino))
+        {
+            Console.WriteLine($"Destino: {t.CuentaDestino}");
+        }
+    }
+    Console.WriteLine("------------------------------------");
+    Pausa();
+}
+
+void AdminDepositarEnCuenta(Usuario admin)
+{
+    Console.Clear();
+    Console.WriteLine("---------- AJUSTE ADMIN ----------");
+
+    Console.Write("Cuenta a acreditar: ");
+    string num = Console.ReadLine() ?? "";
+
+    Console.Write("Monto a acreditar (Q): ");
+    if (!decimal.TryParse(Console.ReadLine(), out var monto) || monto <= 0)
+    {
+        Console.WriteLine("[ERROR] Monto inválido.");
+        Pausa();
         return;
     }
+
+    bool ok = atmService.Depositar(num, monto, adminQueHaceEsto: admin.NumeroCuenta);
+
+    if (!ok)
+    {
+        Console.WriteLine("[ERROR] No se pudo acreditar (cuenta no existe).");
+    }
+    else
+    {
+        Console.WriteLine("[OK] Acreditado correctamente.");
+    }
+
+    Pausa();
+}
+
+void AdminDesbloquearCuenta()
+{
+    Console.Clear();
+    Console.WriteLine("---------- DESBLOQUEAR CUENTA ----------");
+    Console.Write("Número de cuenta a desbloquear: ");
+    string num = Console.ReadLine() ?? "";
+
+    bool ok = atmService.DesbloquearCuenta(num);
+
+    if (!ok)
+    {
+        Console.WriteLine("[ERROR] No se pudo desbloquear (no existe o ya estaba activa).");
+    }
+    else
+    {
+        Console.WriteLine("[OK] Cuenta desbloqueada.");
+    }
+
+    Pausa();
+}
+
+// =========== CREAR CUENTA (para menú principal y admin) ===========
+void CrearCuentaFlujo(AtmService atm, bool esAdminCreando = false)
+{
+    Console.Clear();
+    Console.WriteLine("---------- CREAR CUENTA ----------");
+
+    Console.Write("Número de cuenta nuevo: ");
+    string num = Console.ReadLine() ?? "";
 
     Console.Write("Nombre del titular: ");
-    var nombre = Console.ReadLine()?.Trim() ?? "";
+    string nombre = Console.ReadLine() ?? "";
 
-    Console.Write("PIN (4-6 dígitos recomendado): ");
-    var pin = ConsoleUI.LeerOculto();
-    if (pin.Length < 4)
+    Console.Write("PIN nuevo: ");
+    string pin = LeerPinOculto();
+
+    bool creada = atm.CrearCuenta(num, nombre, pin, isAdmin: esAdminCreando == true ? false : false);
+    // Nota: arriba dejé que incluso el admin cree cuentas normales, no admins. Si quieres que el admin pueda crear otro admin,
+    // cambia a: isAdmin: esAdminCreando
+
+    if (!creada)
     {
-        ConsoleUI.Advertencia("PIN demasiado corto.");
-        ConsoleUI.Continuar();
-        return;
+        Console.WriteLine("[ERROR] No se pudo crear (ya existe o datos inválidos).");
+    }
+    else
+    {
+        Console.WriteLine("[OK] Cuenta creada correctamente.");
     }
 
-    var user = new Usuario
-    {
-        NumeroCuenta = num,
-        Nombre = nombre,
-        PinHash = Hashing.Sha256(pin)
-    };
-    usuarioRepo.Agregar(user);
-    cuentaRepo.Agregar(new Cuenta { NumeroCuenta = num, Saldo = 0m });
+    Pausa();
+}
 
-    ConsoleUI.Ok("Cuenta creada con éxito.");
-    ConsoleUI.Continuar();
+// =========== UTILS LOCALES Program.cs ===========
+
+void Pausa()
+{
+    Console.WriteLine();
+    Console.Write("Presione una tecla para continuar...");
+    Console.ReadKey(true);
+}
+
+string LeerPinOculto()
+{
+    var buffer = new System.Text.StringBuilder();
+    while (true)
+    {
+        var key = Console.ReadKey(intercept: true);
+
+        if (key.Key == ConsoleKey.Enter)
+        {
+            Console.WriteLine();
+            break;
+        }
+        else if (key.Key == ConsoleKey.Backspace)
+        {
+            if (buffer.Length > 0)
+            {
+                buffer.Length--;
+                Console.Write("\b \b");
+            }
+        }
+        else if (char.IsDigit(key.KeyChar))
+        {
+            buffer.Append(key.KeyChar);
+            Console.Write("*");
+        }
+    }
+    return buffer.ToString();
+}
+
+void Semilla(UsuarioRepo usuarioRepo, CuentaRepo cuentaRepo)
+{
+    // si ya existen datos, no tocamos nada
+    if (usuarioRepo.ObtenerTodos().Count > 0 || cuentaRepo.ObtenerTodas().Count > 0)
+        return;
+
+    // crear usuario normal demo
+    var usuarioNormal = new Usuario
+    {
+        NumeroCuenta = "1001",
+        Nombre = "Usuario Demo",
+        PinHash = Hashing.Sha256("1234"),
+        IsAdmin = false,
+        IntentosFallidos = 0,
+        Bloqueada = false
+    };
+
+    var cuentaNormal = new Cuenta
+    {
+        NumeroCuenta = "1001",
+        Saldo = 1500.00m
+    };
+
+    // crear admin demo
+    var usuarioAdmin = new Usuario
+    {
+        NumeroCuenta = "9999",
+        Nombre = "Administrador",
+        PinHash = Hashing.Sha256("0000"),
+        IsAdmin = true,
+        IntentosFallidos = 0,
+        Bloqueada = false
+    };
+
+    var cuentaAdmin = new Cuenta
+    {
+        NumeroCuenta = "9999",
+        Saldo = 0m
+    };
+
+    usuarioRepo.Agregar(usuarioNormal);
+    cuentaRepo.Agregar(cuentaNormal);
+
+    usuarioRepo.Agregar(usuarioAdmin);
+    cuentaRepo.Agregar(cuentaAdmin);
 }

@@ -1,24 +1,45 @@
-﻿using cajero_automatico.Models;
-using cajero_automatico.Repos;
-using cajero_automatico.Utils;
+﻿using CajeroApp.models;
+using CajeroApp.Repos;
+using CajeroApp.Utils;
 
-namespace cajero_automatico.Services;
-
-public class AuthService
+namespace CajeroApp.Services
 {
-    private readonly UsuarioRepo _usuarios;
-
-    public AuthService(UsuarioRepo usuarios)
+    public class AuthService
     {
-        _usuarios = usuarios;
-    }
+        private readonly UsuarioRepo _usuarioRepo;
 
-    public Usuario? Login(string numeroCuenta, string pin)
-    {
-        var u = _usuarios.ObtenerPorCuenta(numeroCuenta);
-        if (u is null) return null;
+        public AuthService(UsuarioRepo usuarioRepo)
+        {
+            _usuarioRepo = usuarioRepo;
+        }
 
-        var hash = Hashing.Sha256(pin);
-        return u.PinHash == hash ? u : null;
+        public Usuario? Autenticar(string numeroCuenta, string pinClaro)
+        {
+            var usuario = _usuarioRepo.ObtenerPorCuenta(numeroCuenta);
+            if (usuario == null) return null;
+
+            if (usuario.Bloqueada) return null; // si quieres usar bloqueo
+
+            var hashIngresado = Hashing.Sha256(pinClaro);
+
+            if (hashIngresado == usuario.PinHash)
+            {
+                // reset de intentos fallidos al entrar bien
+                usuario.IntentosFallidos = 0;
+                _usuarioRepo.Actualizar(usuario);
+                return usuario;
+            }
+            else
+            {
+                // intento fallido
+                usuario.IntentosFallidos++;
+                if (usuario.IntentosFallidos >= 3)
+                {
+                    usuario.Bloqueada = true;
+                }
+                _usuarioRepo.Actualizar(usuario);
+                return null;
+            }
+        }
     }
 }

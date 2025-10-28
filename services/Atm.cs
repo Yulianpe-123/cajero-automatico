@@ -1,97 +1,166 @@
-﻿using cajero_automatico.Models;
-using cajero_automatico.Repos;
+﻿using CajeroApp.models;
+using CajeroApp.Repos;
+using CajeroApp.Utils;
 
-namespace cajero_automatico.Services;
-
-public class AtmService
+namespace CajeroApp.Services
 {
-    private readonly CuentaRepo _cuentas;
-    private readonly TransaccionRepo _trans;
-
-    public AtmService(CuentaRepo cuentas, TransaccionRepo trans)
+    public class AtmService
     {
-        _cuentas = cuentas;
-        _trans = trans;
-    }
+        private readonly CuentaRepo _cuentaRepo;
+        private readonly TransaccionRepo _transRepo;
+        private readonly UsuarioRepo _usuarioRepo;
 
-    public decimal ObtenerSaldo(string numeroCuenta)
-    {
-        var c = _cuentas.ObtenerPorCuenta(numeroCuenta)
-                ?? throw new InvalidOperationException("La cuenta no existe.");
-        return c.Saldo;
-    }
-
-    public void Depositar(string numeroCuenta, decimal monto)
-    {
-        if (monto <= 0) throw new InvalidOperationException("El monto debe ser mayor a cero.");
-        var c = _cuentas.ObtenerPorCuenta(numeroCuenta)
-                ?? throw new InvalidOperationException("La cuenta no existe.");
-        c.Saldo += monto;
-        _cuentas.GuardarOCrear(c);
-
-        _trans.Agregar(new Transaccion
+        public AtmService(CuentaRepo cuentaRepo, TransaccionRepo transRepo, UsuarioRepo usuarioRepo)
         {
-            NumeroCuenta = numeroCuenta,
-            Tipo = TipoTransaccion.Deposito,
-            Monto = monto,
-            Detalle = "Depósito en cuenta"
-        });
-    }
+            _cuentaRepo = cuentaRepo;
+            _transRepo = transRepo;
+            _usuarioRepo = usuarioRepo;
+        }
 
-    public void Retirar(string numeroCuenta, decimal monto)
-    {
-        if (monto <= 0) throw new InvalidOperationException("El monto debe ser mayor a cero.");
-        var c = _cuentas.ObtenerPorCuenta(numeroCuenta)
-                ?? throw new InvalidOperationException("La cuenta no existe.");
-        if (c.Saldo < monto) throw new InvalidOperationException("Saldo insuficiente.");
-        c.Saldo -= monto;
-        _cuentas.GuardarOCrear(c);
-
-        _trans.Agregar(new Transaccion
+        public bool Depositar(string numeroCuenta, decimal monto, string? adminQueHaceEsto = null)
         {
-            NumeroCuenta = numeroCuenta,
-            Tipo = TipoTransaccion.Retiro,
-            Monto = monto,
-            Detalle = "Retiro en cuenta"
-        });
-    }
+            var cuenta = _cuentaRepo.ObtenerPorNumeroCuenta(numeroCuenta);
+            if (cuenta == null) return false;
 
-    public void Transferir(string origen, string destino, decimal monto)
-    {
-        if (string.IsNullOrWhiteSpace(destino))
-            throw new InvalidOperationException("La cuenta destinada es requerida.");
-        if (origen == destino)
-            throw new InvalidOperationException("No puedes transferir a la misma cuenta.");
-        if (monto <= 0)
-            throw new InvalidOperationException("El monto debe ser mayor a cero.");
+            cuenta.Saldo += monto;
+            _cuentaRepo.Actualizar(cuenta);
 
-        var cOrigen = _cuentas.ObtenerPorCuenta(origen)
-                       ?? throw new InvalidOperationException("Cuenta de origen no existe.");
-        var cDestino = _cuentas.ObtenerPorCuenta(destino)
-                       ?? throw new InvalidOperationException("Cuenta destinada no existe.");
-        if (cOrigen.Saldo < monto) throw new InvalidOperationException("Saldo insuficiente.");
+            _transRepo.Agregar(new Transaccion
+            {
+                NumeroCuenta = numeroCuenta,
+                Fecha = DateTime.Now,
+                Tipo = adminQueHaceEsto == null ? "DEPOSITO" : "ADMIN-AJUSTE",
+                Monto = monto,
+                CuentaDestino = adminQueHaceEsto
+            });
 
-        cOrigen.Saldo -= monto;
-        cDestino.Saldo += monto;
-        _cuentas.GuardarOCrear(cOrigen);
-        _cuentas.GuardarOCrear(cDestino);
+            return true;
+        }
 
-        _trans.Agregar(new Transaccion
+        public bool Retirar(string numeroCuenta, decimal monto)
         {
-            NumeroCuenta = origen,
-            Tipo = TipoTransaccion.TransferenciaSalida,
-            Monto = monto,
-            Detalle = "Transferencia a {destino}"
-        });
-        _trans.Agregar(new Transaccion
-        {
-            NumeroCuenta = destino,
-            Tipo = TipoTransaccion.TransferenciaEntrada,
-            Monto = monto,
-            Detalle = "Transferencia desde {origen}"
-        });
-    }
+            var cuenta = _cuentaRepo.ObtenerPorNumeroCuenta(numeroCuenta);
+            if (cuenta == null) return false;
 
-    public List<Transaccion> Historial(string numeroCuenta) =>
-        _trans.ObtenerPorCuenta(numeroCuenta);
+            // validación de saldo
+            if (cuenta.Saldo < monto) return false;
+
+            // validación de límite por operación (ejemplo 2000)
+            if (monto > 2000m) return false;
+
+            cuenta.Saldo -= monto;
+            _cuentaRepo.Actualizar(cuenta);
+
+            _transRepo.Agregar(new Transaccion
+            {
+                NumeroCuenta = numeroCuenta,
+                Fecha = DateTime.Now,
+                Tipo = "RETIRO",
+                Monto = monto
+            });
+
+            return true;
+        }
+
+        public bool Transferir(string cuentaOrigen, string cuentaDestino, decimal monto)
+        {
+            if (cuentaOrigen == cuentaDestino) return false;
+
+            var origen = _cuentaRepo.ObtenerPorNumeroCuenta(cuentaOrigen);
+            var destino = _cuentaRepo.ObtenerPorNumeroCuenta(cuentaDestino);
+
+            if (origen == null || destino == null) return false;
+            if (origen.Saldo < monto) return false;
+
+            origen.Saldo -= monto;
+            _cuentaRepo.Actualizar(origen);
+
+            destino.Saldo += monto;
+            _cuentaRepo.Actualizar(destino);
+
+            _transRepo.Agregar(new Transaccion
+            {
+                NumeroCuenta = cuentaOrigen,
+                Fecha = DateTime.Now,
+                Tipo = "TRANSFERENCIA",
+                Monto = monto,
+                CuentaDestino = cuentaDestino
+            });
+
+            _transRepo.Agregar(new Transaccion
+            {
+                NumeroCuenta = cuentaDestino,
+                Fecha = DateTime.Now,
+                Tipo = "TRANSFERENCIA",
+                Monto = monto,
+                CuentaDestino = cuentaDestino
+            });
+
+            return true;
+        }
+
+        public List<Transaccion> ObtenerHistorial(string numeroCuenta)
+        {
+            return _transRepo.ObtenerPorCuenta(numeroCuenta)
+                             .OrderByDescending(t => t.Fecha)
+                             .ToList();
+        }
+
+        // Crear cuenta (admin crea o usuario crea)
+        public bool CrearCuenta(string numeroCuenta, string nombreTitular, string pinClaro, bool isAdmin)
+        {
+            if (string.IsNullOrWhiteSpace(numeroCuenta)) return false;
+            if (string.IsNullOrWhiteSpace(nombreTitular)) return false;
+            if (string.IsNullOrWhiteSpace(pinClaro)) return false;
+
+            // ¿ya existe?
+            var yaU = _usuarioRepo.ObtenerPorCuenta(numeroCuenta);
+            var yaC = _cuentaRepo.ObtenerPorNumeroCuenta(numeroCuenta);
+            if (yaU != null || yaC != null)
+            {
+                return false;
+            }
+
+            var hash = Hashing.Sha256(pinClaro);
+
+            var nuevoUsuario = new Usuario
+            {
+                NumeroCuenta = numeroCuenta,
+                Nombre = nombreTitular,
+                PinHash = hash,
+                IsAdmin = isAdmin,
+                IntentosFallidos = 0,
+                Bloqueada = false
+            };
+
+            var nuevaCuenta = new Cuenta
+            {
+                NumeroCuenta = numeroCuenta,
+                Saldo = 0m
+            };
+
+            _usuarioRepo.Agregar(nuevoUsuario);
+            _cuentaRepo.Agregar(nuevaCuenta);
+
+            return true;
+        }
+
+        public bool DesbloquearCuenta(string numeroCuenta)
+        {
+            var u = _usuarioRepo.ObtenerPorCuenta(numeroCuenta);
+            if (u == null) return false;
+
+            u.Bloqueada = false;
+            u.IntentosFallidos = 0;
+            _usuarioRepo.Actualizar(u);
+            return true;
+        }
+
+        public List<Cuenta> ListarTodasLasCuentas()
+        {
+            return _cuentaRepo.ObtenerTodas()
+                              .OrderBy(c => c.NumeroCuenta)
+                              .ToList();
+        }
+    }
 }

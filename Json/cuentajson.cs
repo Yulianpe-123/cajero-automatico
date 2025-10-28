@@ -1,28 +1,64 @@
-﻿using cajero_automatico.Models;
+﻿using System.Text.Json;
+using CajeroApp.models;
 
-namespace cajero_automatico.Repos;
-
-public class CuentaRepo : JsonRepo<Cuenta>
+namespace CajeroApp.Repos
 {
-    public CuentaRepo(string path) : base(path) { }
-
-    public List<Cuenta> ObtenerTodos() => Leer();
-
-    public Cuenta? ObtenerPorCuenta(string cuenta) =>
-        Leer().FirstOrDefault(c => c.NumeroCuenta == cuenta);
-
-    public void GuardarOCrear(Cuenta cta)
+    public class CuentaRepo
     {
-        var lista = Leer();
-        var i = lista.FindIndex(c => c.NumeroCuenta == cta.NumeroCuenta);
-        if (i >= 0) lista[i] = cta; else lista.Add(cta);
-        Guardar(lista);
-    }
+        private readonly string _path;
+        private readonly JsonSerializerOptions _opts = new JsonSerializerOptions
+        {
+            WriteIndented = true
+        };
 
-    public void Agregar(Cuenta cta)
-    {
-        var lista = Leer();
-        lista.Add(cta);
-        Guardar(lista);
+        public CuentaRepo(string path)
+        {
+            _path = path;
+            if (!File.Exists(_path))
+            {
+                File.WriteAllText(_path, "[]");
+            }
+        }
+
+        private List<Cuenta> LeerTodo()
+        {
+            var raw = File.ReadAllText(_path);
+            var data = JsonSerializer.Deserialize<List<Cuenta>>(raw, _opts);
+            return data ?? new List<Cuenta>();
+        }
+
+        private void GuardarTodo(List<Cuenta> lista)
+        {
+            var raw = JsonSerializer.Serialize(lista, _opts);
+            File.WriteAllText(_path, raw);
+        }
+
+        public List<Cuenta> ObtenerTodas()
+        {
+            return LeerTodo();
+        }
+
+        public Cuenta? ObtenerPorNumeroCuenta(string numeroCuenta)
+        {
+            return LeerTodo().FirstOrDefault(c => c.NumeroCuenta == numeroCuenta);
+        }
+
+        public void Agregar(Cuenta cta)
+        {
+            var lista = LeerTodo();
+            lista.Add(cta);
+            GuardarTodo(lista);
+        }
+
+        public void Actualizar(Cuenta cta)
+        {
+            var lista = LeerTodo();
+            var idx = lista.FindIndex(x => x.NumeroCuenta == cta.NumeroCuenta);
+            if (idx >= 0)
+            {
+                lista[idx] = cta;
+                GuardarTodo(lista);
+            }
+        }
     }
 }

@@ -1,0 +1,26 @@
+[
+  {
+    "NumeroCuenta": "1001",
+    "Nombre": "Usuario Demo",
+    "PinHash": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+    "IsAdmin": false,
+    "IntentosFallidos": 0,
+    "Bloqueada": false
+  },
+  {
+    "NumeroCuenta": "9999",
+    "Nombre": "Administrador",
+    "PinHash": "9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0",
+    "IsAdmin": true,
+    "IntentosFallidos": 0,
+    "Bloqueada": false
+  },
+  {
+    "NumeroCuenta": "1236",
+    "Nombre": "yuyan",
+    "PinHash": "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3",
+    "IsAdmin": false,
+    "IntentosFallidos": 0,
+    "Bloqueada": false
+  }
+]

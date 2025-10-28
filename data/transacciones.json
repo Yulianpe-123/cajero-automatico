@@ -1,0 +1,16 @@
+[
+  {
+    "NumeroCuenta": "1236",
+    "Fecha": "2025-10-27T22:58:45.3756628-06:00",
+    "Tipo": "DEPOSITO",
+    "Monto": 2000,
+    "CuentaDestino": null
+  },
+  {
+    "NumeroCuenta": "1236",
+    "Fecha": "2025-10-27T22:58:58.9804654-06:00",
+    "Tipo": "DEPOSITO",
+    "Monto": 200,
+    "CuentaDestino": null
+  }
+]
